@@ -1,31 +1,38 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%             Encodage d'un signal sinusoidal                             %
+%       Encodage d'un signal sinusoidal                                   %
 %                                                                         %
-%       Étudiant : FAVREAU Francois                                       %
+%       Etudiant : FAVREAU Francois                                       %
 %       Directeur : ROUAT Jean                                            %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 clear all,
 clc;
 
+% Parameters
+simul_duration = 1; % amount of time given to the simulation (seconds)
+
 nbchan = 1;     % EEG.nbchan
-nb_samples = 1000;  % EEG.pnts
+nb_samples = 1000*simul_duration;  % EEG.pnts
 stimuli = 1;    % EEG.trials
 
 % Create the matrix corresponding to spikes 
 final_output_spike = zeros(nbchan, nb_samples, stimuli);
 
-threshold_ampl_freq = 5; % threshold for ampl_freq algorithm
-threshold_BSA = 0.86; % threshold for ampl_freq algorithm
+threshold_ampl_freq = 1; % threshold for ampl_freq algorithm
+threshold_BSA = 0.86;    % threshold for BSA algorithm
 
-% Sampling sinusoidal function
-Ts = 100;       % sinus period
-fs = 1/Ts;      % sinus frequency
-t = 1:nb_samples;     % time sampling
-y = sin(2*pi*fs*t); % sinus generation
+% Time characteristics
+Fs = nb_samples;    % sampling frequency (sample per second)
+dt = simul_duration/nb_samples;  % second per sample
+stopTime = simul_duration;       % second
+t = (0:dt:stopTime-dt)';     % seconds    
 
+% Sine wave 
+Fc = 10;           % frequency (Hertz)
+y = 0.5*(1+sin(2*pi*Fc*t)); % continuous function
+   
 % Type of spike encoding choice
-mode = 1; % amplitude/frequency = 0 ; BSA = 1
+mode = 0; % amplitude/frequency = 0 ; BSA = 1
 switch mode
     case 0
         encoding_type = 'Encoding type : Amplitude/frequency';
@@ -37,9 +44,24 @@ switch mode
         disp('Choose type of spike encoding : amplitude/frequency = 0 ; BSA = 1')
 end
 
+% Blank in signal
+blank = 1;
+start_blank = 300;
+length_blank = 50;
+if (blank==0)
+    for i=start_blank:start_blank+length_blank
+        final_output_spike(:,i,:) = 0;
+    end
+end
+        
 % Display spike trains
 display_input_and_spikeTrains( y, final_output_spike, t, encoding_type )
 
 % Save matrix
-save('C:\Users\ffavreau\PycharmProjects\Essai\6_Reservoir_RNN\Code_Matlab\dataset_BSA','final_output_spike')
+if mode==0
+    file_name = sprintf('dataset_%s_%d_sec','ampl_freq', simul_duration);
+elseif mode==1
+    file_name = sprintf('dataset_%s_%d_sec','BSA', simul_duration);    
+end
+save(file_name,'final_output_spike')
 
