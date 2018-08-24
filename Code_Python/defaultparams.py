@@ -260,8 +260,7 @@ def sequenceInputSynthetic(duration, microcircuit, tuner):
         for n in range (len(finalSequence[0,:])):       # len(finalSequence[0,:]) = 1000
             for i in range(nbInputs):
                 if finalSequence[0,n]==1:   # if we get a "1", the neuron fire
-                    t = (n+i) * widthEpoch   #TODO
-                    print("i : ",i,"    /    t : ",t)
+                    t = (n+i) * widthEpoch   #TODO : change value t depending on the desired delay
                     spiketimes.append((i,t))
 
 
