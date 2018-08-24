@@ -47,16 +47,14 @@ from monitors import *
 from testing import *
 from rankorder import *
 
-from pyfann import libfann
-
+from sklearn import linear_model
 class DelayedRateMonitor(SpikeMonitor):
-
     def __init__(self, source, epochWidth=50 * ms, delay=0 * ms):
         SpikeMonitor.__init__(self, source, record=False, delay=delay)
         if bin:
             self._bin = int(epochWidth / source.clock.dt)
         else:
-            self._bin = 1 # bin size in number
+            self._bin = 1  # bin size in number
         self._acc = numpy.zeros(len(self.source))
         self.epochWidth = epochWidth
         self.delay = delay
@@ -80,8 +78,8 @@ class DelayedRateMonitor(SpikeMonitor):
             self._acc[i] += 1.0
         self._curstep -= 1
 
+# Ajout par Francois Favreau : voir getStateTab()
 class MfrReservoirStateReadout(NetworkOperation):
-
     def __init__(self, N, microcircuit, epochWidth, delay=0 * ms, preallocate=10000):
 
         self.N = N
@@ -91,13 +89,14 @@ class MfrReservoirStateReadout(NetworkOperation):
         self.delay = delay
         self.epochWidth = epochWidth
         self.epochSteps = int(epochWidth / defaultclock.dt)
+        self.stateTab = []
 
         # Choose a subset of the population for the readout
         neuronIdx = range(0, len(microcircuit.microcircuit))
         numpy.random.shuffle(neuronIdx)
         self.readoutNeurons = neuronIdx[0:N]
         self.rateMonitor = DelayedRateMonitor(microcircuit.microcircuit, epochWidth, delay)
-        NetworkOperation.__init__(self, lambda:None, clock=EventClock(dt=defaultclock.dt))
+        NetworkOperation.__init__(self, lambda: None, clock=EventClock(dt=defaultclock.dt))
         self.contained_objects += [self.rateMonitor]
 
     def __call__(self):
@@ -111,19 +110,38 @@ class MfrReservoirStateReadout(NetworkOperation):
             tmax = self.clock.t
 
             state = self.rateMonitor.rate[self.readoutNeurons]
+            for n in state:
+                self.stateTab.append(n)
 
             self.epochCounter += 1
             self.stepCounter = self.epochSteps
 
-            print 'Reservoir state at t = %4.1fms, epoch = [%4.1fms, %4.1fms]: orders = ' % (self.clock.t / ms, tmin / ms, tmax / ms), state
+            print 'Reservoir state at t = %4.1fms, epoch = [%4.1fms, %4.1fms]: orders = ' % (
+                self.clock.t / ms, tmin / ms, tmax / ms), state
 
         self.stepCounter -= 1
+
+        StateTab = open('StateTab.txt', 'w')
+        for item in self.stateTab:
+            StateTab.write("%s\n" % item)
+        StateTab.close()
 
     def getStateData(self):
         return list(self.stateData[0:self.epochCounter, :])
 
-class RocReservoirStateReadout(NetworkOperation):
+    def getStateTab(self):
+        f = open('StateTab.txt', 'r+')
+        stateTab = []
+        for line in f.readlines():
+            y = [float(value) for value in line.split()]
+            stateTab.append(y[0])
+        f.close()
+        return stateTab
 
+
+
+
+class RocReservoirStateReadout(NetworkOperation):
     def __init__(self, N, microcircuit, epochWidth, delay=0 * ms, preallocate=10000):
 
         self.N = N
@@ -141,7 +159,7 @@ class RocReservoirStateReadout(NetworkOperation):
         numpy.random.shuffle(neuronIdx)
         self.readoutNeurons = neuronIdx[0:N]
         self.spikeMonitor = LastSpikeMonitor(microcircuit.microcircuit)
-        NetworkOperation.__init__(self, lambda:None, clock=EventClock(dt=defaultclock.dt))
+        NetworkOperation.__init__(self, lambda: None, clock=EventClock(dt=defaultclock.dt))
         self.contained_objects += [self.spikeMonitor]
 
     def __call__(self):
@@ -176,19 +194,19 @@ class RocReservoirStateReadout(NetworkOperation):
                     order = -1
                 orderFixed[orders[i]] = order
 
-            # DFT transform for translation invariance
-#            for i in range(orders.shape[0]):
-#                if orderedSpikeTimes[orders[i], 0] == float('inf'):
-#                    orders[i] = 0
-#                else:
-#                    orders[i] += 1
-#
-#            Y = numpy.fft.fft(orders) / len(orders)
-#            Y = Y[1:(len(orders) / 2)]
-#            ordersMag = abs(Y) ** 2
-#
-#            orderFixed = numpy.zeros(len(orders))
-#            orderFixed[0:len(ordersMag)] = ordersMag
+                # DFT transform for translation invariance
+            # for i in range(orders.shape[0]):
+            #                if orderedSpikeTimes[orders[i], 0] == float('inf'):
+            #                    orders[i] = 0
+            #                else:
+            #                    orders[i] += 1
+            #
+            #            Y = numpy.fft.fft(orders) / len(orders)
+            #            Y = Y[1:(len(orders) / 2)]
+            #            ordersMag = abs(Y) ** 2
+            #
+            #            orderFixed = numpy.zeros(len(orders))
+            #            orderFixed[0:len(ordersMag)] = ordersMag
 
             if self.epochCounter >= self.orderData.shape[0]:
                 # Warning: dynamically resizing array
@@ -198,14 +216,16 @@ class RocReservoirStateReadout(NetworkOperation):
             self.epochCounter += 1
             self.stepCounter = self.epochSteps
 
-            #print 'Reservoir state at t = %4.1fms, epoch = [%4.1fms, %4.1fms]: orders = ' % (self.clock.t / ms, tmin / ms, tmax / ms), orders
+            # print 'Reservoir state at t = %4.1fms, epoch = [%4.1fms, %4.1fms]: orders = ' % (self.clock.t / ms, tmin / ms, tmax / ms), orders
 
         self.stepCounter -= 1
 
     def getStateData(self):
         return list(self.orderData[0:self.epochCounter, :])
 
+
 def classifyMultilayerANN(stateData, targets):
+    from pyfann import libfann
 
     numInput = len(stateData[0])
     numHidden = 5 * numInput
@@ -223,7 +243,7 @@ def classifyMultilayerANN(stateData, targets):
     ann.set_training_algorithm(libfann.TRAIN_QUICKPROP)
     ann.set_train_error_function(libfann.ERRORFUNC_LINEAR)
 
-    #Create the train and test datasets
+    # Create the train and test datasets
     inputs = []
     outputs = []
     for i in range(len(stateData)):
@@ -267,8 +287,64 @@ def classifyMultilayerANN(stateData, targets):
     return accuracy
 
 
-def classifyKNearestNeighbor(stateData, targets):
+# function create by MarcAntoine
 
+def classifyLinearRegression(stateData, targets):
+    #Create the train and test datasets
+    minLen = numpy.min((len(stateData), len(targets)))
+    data = numpy.array(stateData[0:minLen])
+    labels = numpy.array(targets[0:minLen])
+
+    # Generate train and test data (with shuffled data)
+    trainRatio = 0.75
+    nbTrainData = int(trainRatio * len(data))
+    dataIdx = range(0, len(data))
+    numpy.random.shuffle(dataIdx)
+    trainData = list(data[dataIdx[0:nbTrainData]])
+    trainLabels = list(labels[dataIdx[0:nbTrainData]])
+    testData = list(data[dataIdx[nbTrainData:]])
+    testLabels = list(labels[dataIdx[nbTrainData:]])
+
+    # Create the classifier
+    from sklearn import linear_model
+
+    clf = linear_model.LinearRegression()
+    clf.fit(trainData, trainLabels)
+
+    # Validate classification on the test data
+    outputLabels = numpy.round(clf.predict(testData))
+    nbErrors = 0
+    nbTotal = len(outputLabels)
+
+    tamp = list(outputLabels)
+
+    zero_output = tamp.count(0)
+    one_output = tamp.count(1)
+    two_output = tamp.count(2)
+    print 'zero output = %d' % (zero_output)
+    print 'one output = %d' % (one_output)
+    print 'two output = %d' % (two_output)
+
+    zero_test = testLabels.count(0)
+    one_test = testLabels.count(1)
+    two_test = testLabels.count(2)
+    print 'zero test = %d' % (zero_test)
+    print 'one test = %d' % (one_test)
+    print 'two test = %d' % (two_test)
+    print 'Nombre total = %d' % (nbTotal)
+
+    for i in range(len(outputLabels)):
+        if outputLabels[i] != testLabels[i]:
+            nbErrors += 1
+            print testLabels[i]
+
+    accuracy = float(nbTotal - nbErrors) / float(nbTotal)
+    print 'Nombre error = %d' % (nbErrors)
+
+    return accuracy
+
+
+def classifyKNearestNeighbor(stateData, targets):
     #Create the train and test datasets
     minLen = numpy.min((len(stateData), len(targets)))
     data = numpy.array(stateData[0:minLen])
@@ -286,6 +362,7 @@ def classifyKNearestNeighbor(stateData, targets):
 
     # Create the classifier
     from sklearn.neighbors import KNeighborsClassifier
+
     neigh = KNeighborsClassifier(n_neighbors=5)
     neigh.fit(trainData, trainLabels)
 
@@ -300,8 +377,8 @@ def classifyKNearestNeighbor(stateData, targets):
 
     return accuracy
 
-def testReservoirReadout(structure):
 
+def testReservoirReadout(structure):
     extractParams, inputModelParams = defaultparams.getDefaultExtractParams()
 
     N, connectivity, connectParams = defaultparams.getDefaultConnectivityParams(structure)
@@ -311,15 +388,15 @@ def testReservoirReadout(structure):
 
     # Input
     duration = 1000 * ms
-    input, inputConnections, seq, orderData, patterns = defaultparams.createDefaultPatternInput(duration, microcircuit, None)
+    input, inputConnections, seq, orderData, orders, times, widthEpoch = defaultparams.createDefaultPatternInput(duration, microcircuit, None)
     network.add(input)
     network.add(inputConnections)
 
     # Readout
     N = 8
     delay = 10 * ms
-    steps = int(duration / patterns.width)
-    readout = MfrReservoirStateReadout(N, microcircuit, patterns.width, delay, preallocate=steps)
+    steps = int(duration / widthEpoch)
+    readout = MfrReservoirStateReadout(N, microcircuit, widthEpoch, delay, preallocate=steps)
     network.add(readout)
 
     # Monitor
@@ -333,7 +410,9 @@ def testReservoirReadout(structure):
     network.reinit(states=False)
     network.run(duration)
 
-def testReservoirComputing(structure, cbf, classification, task='class'):
+
+# Initial function by Simon
+def testReservoirComputing1(structure, cbf, classification, task='class'):
 
     nbTrials = 1
 
@@ -378,9 +457,9 @@ def testReservoirComputing(structure, cbf, classification, task='class'):
         # Simulation
         network.reinit(states=False)
         network.run(duration, report='text')
-        pylab.close(logMonitor.fig)
-        pylab.close(resSpikeMonitor.fig)
-        pylab.close(inputSpikeMonitor.fig)
+        #pylab.close(logMonitor.fig)
+        #pylab.close(resSpikeMonitor.fig)
+        #pylab.close(inputSpikeMonitor.fig)
 
         print "Generating data for readout training..."
 
@@ -480,8 +559,116 @@ def testReservoirComputing(structure, cbf, classification, task='class'):
     fig.canvas.draw()
 
 
-def testGenerateSpikePatterns():
 
+
+
+
+#function create by MarcAntoine
+def testReservoirComputing(structure, cbf, classification, task='class'):
+    N, connectivity, connectParams = defaultparams.getDefaultConnectivityParams(structure)
+    neuronModel, modelParams = defaultparams.getDefaultMicrocircuitModelParams()
+    microcircuit = Microcircuit(N, neuronModel, modelParams, connectivity, connectParams)
+    network = Network(microcircuit.microcircuit, microcircuit.connections)
+
+    defaultclock.dt = defaultparams.getDefaultSimulationTimeStep()
+
+    # Training
+    print "Training microcircuit for cbf %f..." % (cbf)
+    method, trainParams = defaultparams.getDefaultTrainingParams()
+    trainParams['alpha'] = cbf
+    trainParams['refractory'] = modelParams['refractory']
+    tuner = LTSOCP(microcircuit, trainParams)
+    network.add(tuner)
+
+    # Input
+    input, inputConnections, seqSpiketimes, labels = defaultparams.sequenceInputEeg(microcircuit, tuner)
+    network.add(input)
+    network.add(inputConnections)
+    duration = seqSpiketimes[-1][1] + 500 * ms
+
+    # Monitor
+    steps = int(duration / defaultclock.dt)
+    logMonitor = LTSOCP_Monitor(tuner, refresh=25 * ms, preallocate=steps, clock=EventClock(dt=25 * ms))
+    network.add(logMonitor)
+
+    resSpikeMonitor = RealtimeSpikeMonitor(microcircuit.microcircuit, refresh=25 * ms, showlast=200 * ms, unit=ms)
+    network.add(resSpikeMonitor)
+
+    inputSpikeMonitor = RealtimeSpikeMonitor(input, refresh=25 * ms, showlast=200 * ms, unit=ms)
+    network.add(inputSpikeMonitor)
+
+    # Simulation
+    network.reinit(states=False)
+    network.run(250 * ms, report='text')
+    pylab.close(logMonitor.fig)
+    pylab.close(resSpikeMonitor.fig)
+    pylab.close(inputSpikeMonitor.fig)
+
+    # Training data
+    data = {}
+    for s in range(len(labels)):
+        print "Generating data for readout training with sequences %s..." % (labels[s])
+        network = Network(microcircuit.microcircuit, microcircuit.connections)
+
+        # Input
+        input, inputConnectionsTrain, seqSpiketimes, labels = defaultparams.sequenceInputEeg(microcircuit, tuner=None,
+                                                                                             seqIdx=s)
+        for i in range(inputConnections.W.shape[0]):
+            row = inputConnections.W[i, :]
+            for j, w in izip(row.ind, row):
+                inputConnectionsTrain.W[i, j] = w
+        network.add(input)
+        network.add(inputConnectionsTrain)
+        duration = seqSpiketimes[-1][1]
+        print duration
+        # Monitor
+        resSpikeMonitor = RealtimeSpikeMonitor(microcircuit.microcircuit, refresh=25 * ms, showlast=200 * ms, unit=ms)
+        network.add(resSpikeMonitor)
+
+        inputSpikeMonitor = RealtimeSpikeMonitor(input, refresh=25 * ms, showlast=200 * ms, unit=ms)
+        network.add(inputSpikeMonitor)
+
+        counter = SpikeRateMonitor(microcircuit.microcircuit, bin=200 * ms)
+        network.add(counter)
+
+
+        # Simulation
+        network.reinit(states=False)
+        network.run(duration, report='text')
+        pylab.close(resSpikeMonitor.fig)
+        pylab.close(inputSpikeMonitor.fig)
+
+        if labels[s] not in data:
+            data[labels[s]] = []
+
+        data[labels[s]].append(counter.rates)
+
+    # Readout
+    stateData = []
+    target = []
+    for classIdx, classData in data.iteritems():
+        for seqData in classData:
+            seqData = numpy.array(seqData).T
+            for state in seqData:
+                stateData.append(state.tolist())
+                target.append(classIdx)
+
+    print numpy.array(stateData).shape
+    print target
+
+
+    # Training
+
+    if classification == 'ann':
+        accuracy = classifyMultilayerANN(stateData, target)
+    elif classification == 'knn':
+        accuracy = classifyKNearestNeighbor(stateData, target)
+    elif classification == 'LinearRegression':
+        accuracy = classifyLinearRegression(stateData, target)
+    print 'Performances after training : accuracy = %f' % (accuracy)
+
+
+def testGenerateSpikePatterns():
     defaultclock.dt = defaultparams.getDefaultSimulationTimeStep()
 
     nbNeurons = 512
@@ -493,15 +680,106 @@ def testGenerateSpikePatterns():
 
     plotPatterns(patterns)
 
-if __name__ == '__main__':
 
+
+# Function created by Francois Favreau
+def displayStateEvolution(N, state, widthEpoch, delay):
+
+    if (N<10):
+        liste = []
+        abs = []
+        cpt = 1
+        plt.figure(1)
+        plt.title("Reservoir State")
+        for n in range (1, N+1):    #for each readout neuron
+            for i in xrange(n-1, len(state), N):
+                liste.append(state[i])
+                abs.append(delay + cpt*widthEpoch)
+                cpt = cpt+1
+
+            figureNumber = int( str(N)+'1'+str(n) )
+            plt.subplot(figureNumber)
+            plt.plot(abs, liste)
+            plt.xlabel('t (s)')
+            xlim(xmin=0)
+            plt.ylabel('firing rate')
+            ylim(0, 150)
+            liste = []
+            abs = []
+            cpt = 1
+        plt.show()
+    else:
+        print("Too many readout neurons to display : choose N<10")
+
+# Function created by Francois Favreau
+def testPrediction(structure):
+
+    # Network initialization
+    N, connectivity, connectParams = defaultparams.getDefaultConnectivityParams(structure)
+    neuronModel, modelParams = defaultparams.getDefaultMicrocircuitModelParams()
+    microcircuit = Microcircuit(N, neuronModel, modelParams, connectivity, connectParams)
+    network = Network(microcircuit.microcircuit, microcircuit.connections)
+
+    defaultclock.dt = defaultparams.getDefaultSimulationTimeStep()
+
+    # Training
+    print("Training microcircuit for cbf 1.0...")
+    method, trainParams = defaultparams.getDefaultTrainingParams()
+    trainParams['alpha'] = 1.0
+    trainParams['refractory'] = modelParams['refractory']
+    tuner = LTSOCP(microcircuit, trainParams)
+    network.add(tuner)
+
+    # Input
+    duration = 1000 * ms
+    input, inputConnections, widthEpoch = defaultparams.sequenceInputSynthetic(duration, microcircuit, tuner)
+    network.add(input)
+    network.add(inputConnections)
+
+    # Readout
+    N = 6
+    delay = 10 * ms
+    steps = int(duration / defaultclock.dt)
+    readout = MfrReservoirStateReadout(N, microcircuit, widthEpoch, delay, preallocate=steps)
+    network.add(readout)
+
+    # Monitor
+    spikeMonitor = RealtimeSpikeMonitor(microcircuit.microcircuit, refresh=25 * ms, showlast=200 * ms, unit=ms)
+    network.add(spikeMonitor)
+
+    spikeMonitor = RealtimeSpikeMonitor(input, refresh=25 * ms, showlast=200 * ms, unit=ms)
+    network.add(spikeMonitor)
+
+    sM = RealtimeSpikeMonitor(microcircuit.microcircuit, refresh=25 * ms, showlast=200 * ms, unit=ms)
+    network.add(sM)
+
+
+    # Simulation
+    network.reinit(states=False)
+    network.run(duration * 1.1, report='text')
+
+
+    #Show spike times
+    raster_plot(spikeMonitor.monitor)
+    raster_plot(sM.monitor)
+
+    state = readout.getStateTab()
+    displayStateEvolution(N, state, widthEpoch, delay)  # Display firing rate
+
+
+
+
+if __name__ == '__main__':
     numpy.random.seed(0)
     numpy.seterr(all='raise')
     pylab.ion()
 
     #testGenerateSpikePatterns()
     #testReservoirReadout('small-world')
-    testReservoirComputing('small-world', 1.0, 'knn')
+    #testReservoirComputing1('small-world', 1.0, 'knn')
+    #testReservoirComputing('small-world', 1.0, 'LinearRegression')
+
+    testPrediction('small-world')
 
     print 'All done.'
     pylab.ioff()

@@ -88,15 +88,18 @@ class LTSOCP_Monitor(NetworkOperation):
         # Calculate the average variance across all neurons
         globalVarContrib = 0.0
         nbNonNulContrib = 0.0
-        varDataFlat = numpy.array([])
+        varDataFlat = []
         for i in range(self.tuner.neuronLogData.shape[0]):
             if self.tuner.neuronLogDataLen[i] > 0:
                 curVarData = self.tuner.neuronLogData[i, 0:self.tuner.neuronLogDataLen[i]]
                 varContrib = numpy.var(curVarData)
-                varDataFlat = numpy.append(varDataFlat, curVarData)
+                varDataFlat.append(curVarData)
                 globalVarContrib += varContrib
                 nbNonNulContrib += 1
-        localVarContrib = numpy.var(varDataFlat)
+        if len(varDataFlat) == 0:
+            localVarContrib = 0
+        else:
+            localVarContrib = numpy.var(numpy.concatenate(varDataFlat))
         if nbNonNulContrib > 0:
             globalVarContrib /= float(nbNonNulContrib)
 

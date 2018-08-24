@@ -601,11 +601,11 @@ if __name__ == '__main__':
 
 
     structure = 'small-world'
-    #testReservoirRegime(structure, 5 * second)
-    testConvergenceFluctuation(structure, audioFilename)
+    testReservoirRegime(structure, 5 * second)
+    #testConvergenceFluctuation(structure, audioFilename)
     #testTargetConvergence(structure, audioFilename, 10 * second)
 
-    #testReservoirResponse(audioFilename)
+    #testReservoirResponse(structure, audioFilename, 1.0)
 
     # Generate feature extraction examples and input spike trains 
     #testFeatureExtraction(audioFilename, 15 * second)

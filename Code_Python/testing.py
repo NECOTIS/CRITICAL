@@ -20,7 +20,6 @@ from matplotlib import cm
 import pickle
 from brian.library.IF import Izhikevich, AdaptiveReset
 from brian.plotting import raster_plot
-import scipy.maxentropy.maxentutils
 
 from monitors import *
 

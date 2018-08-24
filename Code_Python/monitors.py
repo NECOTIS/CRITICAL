@@ -21,7 +21,8 @@ from matplotlib import cm
 import pickle
 from brian.library.IF import Izhikevich, AdaptiveReset
 from brian.plotting import raster_plot
-import scipy.maxentropy.maxentutils
+
+
 
 class NeuronRateMonitor(SpikeMonitor):
 
@@ -198,6 +199,47 @@ class SecondTupleArray(object):
         return float(self.obj[i][1])
     def __len__(self):
         return len(self.obj)
+
+class SpikeRateMonitor(SpikeMonitor):
+
+    times = property(fget=lambda self:array(self._times))
+    times_ = times
+    rates = property(fget=lambda self:array(self._rates))
+    rates_ = rates
+
+    def __init__(self, source, bin=None):
+        SpikeMonitor.__init__(self, source)
+        if bin:
+            self._bin = int(bin / source.clock.dt)
+        else:
+            self._bin = 1 # bin size in number
+        self._rates = []
+        for n in range(len(source)):
+            self._rates.append([])
+        self._times = []
+        self._curstep = 0
+        self._clock = source.clock
+        self._factor = 1. / float(self._bin * source.clock.dt)
+
+    def reinit(self):
+        SpikeMonitor.reinit(self)
+        self._rates = []
+        for n in range(len(self.source)):
+            self._rates.append([])
+        self._times = []
+        self._curstep = 0
+
+    def propagate(self, spikes):
+        if self._curstep == 0:
+            for n in range(len(self.source)):
+                self._rates[n].append(0.)
+            self._times.append(self._clock._t) # +.5*bin?
+            self._curstep = self._bin
+
+        for spike in spikes:
+            self._rates[spike][-1] += self._factor
+        self._curstep -= 1
+
 
 class RealtimeSpikeMonitor(NetworkOperation):
 
