@@ -3,7 +3,7 @@ Spiking Reservoir with a critical branching factor
 
 ##############################################
 
-######### Code_Matlab        
+## Code_Matlab        
 
 
 
@@ -13,7 +13,7 @@ Le code écrit en Matlab gère l’encodage du signal d’entrée. Il suffit de 
 
 ##############################################
 
-######### Code_Python
+## Code_Python
 
 
 
@@ -30,7 +30,7 @@ Le code écrit en Python s’occupe de l’initialisation du réseau et de la vi
 
 ##############################################
 
-#########    Packages et Versions
+## Packages et Versions
 
 
 
@@ -68,7 +68,5 @@ sympy 1.0
 wincertstore 0.2
 
 
-Pour le code Python, penser à bien installer les bonnes versions des packages
-
-pour pouvoir le faire fonctionner sur Windows 10.
+Pour le code Python, penser à bien installer les bonnes versions des packages pour pouvoir le faire fonctionner sur Windows 10.
 
