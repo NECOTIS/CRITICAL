@@ -25,3 +25,28 @@ Pour le faire fonctionner, il faut :
 
 
 
+##############################################
+#########    Packages et Versions    #########
+##############################################
+
+Matlab 8.6
+Pycharm 2018.1.4 (Community Edition)
+
+brian 1.3.0
+certifi 2018.4.16
+matplotlib 1.4.0
+mpmath 1.0.0
+numpy 1.10.4
+pyparsing 2.0.1
+python-dateutil 2.4.1
+pytz 2018.5
+scikit-learn 0.19.1
+scipy 0.13.3
+six 1.11.0
+sklearn 0.0
+sympy 1.0
+wincertstore 0.2
+
+Pour le code Python, penser à bien installer les bonnes versions des packages
+pour pouvoir le faire fonctionner sur Windows 10.
+
