@@ -3,33 +3,21 @@ Spiking Reservoir with a critical branching factor
 
 ##############################################
 
-#########        Code_Matlab         #########
-
-##############################################
+######### Code_Matlab        
 
 
-Le code écrit en Matlab gère l’encodage du signal d’entrée.
 
-Il suffit de lancer le fichier spike_encoding_sinus.m
-
-pour créer une matrice binaire correspondant au signal encodé. 
-
-Un fichier .mat sera généré.
+Le code écrit en Matlab gère l’encodage du signal d’entrée. Il suffit de lancer le fichier spike_encoding_sinus.m pour créer une matrice binaire correspondant au signal encodé. Un fichier .mat sera généré.
 
 
 
 ##############################################
 
-#########        Code_Python         #########
-
-##############################################
+######### Code_Python
 
 
-Le code écrit en Python s’occupe de l’initialisation du réseau
 
-et de la visualisation de la dynamique. 
-
-Pour le faire fonctionner, il faut :
+Le code écrit en Python s’occupe de l’initialisation du réseau et de la visualisation de la dynamique. Pour le faire fonctionner, il faut :
 
 1- Déplacer le fichier .mat généré précédemment dans le dossier Code_Python 
 
@@ -42,9 +30,8 @@ Pour le faire fonctionner, il faut :
 
 ##############################################
 
-#########    Packages et Versions    #########
+#########    Packages et Versions
 
-##############################################
 
 
 Matlab 8.6
