@@ -6,13 +6,13 @@ function [] = display_input_and_spikeTrains( y, final_output_spike, t, encoding_
     subplot(2,1,1)
     plot(t,y);
     title('Input signal');
-    xlabel('Time');
+    xlabel('Time (seconds)');
     ylabel('Amplitude');
 
 
     subplot(2,1,2)
     stem(final_output_spike);
-    xlabel('Time');
+    xlabel('Time (samples)');
     title('Spike trains');
     
     suptitle(encoding_type)
