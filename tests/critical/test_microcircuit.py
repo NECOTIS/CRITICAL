@@ -26,6 +26,7 @@
 
 import logging
 import unittest
+import numpy as np
 import matplotlib.pyplot as plt
 
 from brian2.units.stdunits import ms, Hz
@@ -96,17 +97,17 @@ class TestMicrocircuit(unittest.TestCase):
         plt.ion()
         plt.show()
         plt.draw()
-        plt.pause(1.0)
+        plt.pause(100.0)
         plt.close(fig)
 
     def test_synapse_dynamic_single(self):
-        G = createNeuronGroup(N=2, refractory=15 * ms, tau=50 * ms, vti=0.1)
+        G = createNeuronGroup(N=2, refractory=15 * ms, tau=50 * ms, vti=0.0)
         S = createCriticalSynapses(G)
 
         S.connect(i=0, j=1)
         S.w = 0.05
-        S.cbf = 1.0
-        S.lr = 0.01
+        S.cbft = 1.0
+        S.lr = 0.05
 
         # Input to the network
         P = PoissonGroup(1, 40 * Hz)
@@ -148,8 +149,23 @@ class TestMicrocircuit(unittest.TestCase):
         plt.xlim([0.0, duration / ms])
 
         plt.subplot(224)
-        plt.plot(Ms.t / ms, Mg[0].ulast.T)
+        plt.plot(Mg.t / ms, Mg[0].cbf.T)
         plt.ylabel('cbf')
+        plt.xlabel('Time [ms]')
+        plt.xlim([0.0, duration / ms])
+
+        plt.tight_layout()
+
+        fig = plt.figure()
+        plt.subplot(211)
+        plt.plot(Mg.t / ms, Mg[0].ct.T)
+        plt.ylabel('ct')
+        plt.xlabel('Time [ms]')
+        plt.xlim([0.0, duration / ms])
+
+        plt.subplot(212)
+        plt.plot(Ms.t / ms, Ms.c.T)
+        plt.ylabel('c')
         plt.xlabel('Time [ms]')
         plt.xlim([0.0, duration / ms])
 
@@ -158,7 +174,7 @@ class TestMicrocircuit(unittest.TestCase):
         plt.ion()
         plt.show()
         plt.draw()
-        plt.pause(1.0)
+        plt.pause(100.0)
         plt.close(fig)
 
     def test_synapse_dynamic_dual(self):
@@ -167,7 +183,7 @@ class TestMicrocircuit(unittest.TestCase):
 
         S.connect(i=[0, 1], j=[2, 2])
         S.w = 0.05
-        S.cbf = 0.5
+        S.cbft = 0.5
         S.lr = 0.01
 
         # Input to the network
@@ -227,17 +243,17 @@ class TestMicrocircuit(unittest.TestCase):
         plt.close(fig)
 
     def test_synapse_dynamic_multi(self):
-        G = createNeuronGroup(N=4, refractory=15 * ms, tau=50 * ms, vti=0.1)
+        G = createNeuronGroup(N=4, refractory=15 * ms, tau=50 * ms, vti=0.5)
         S = createCriticalSynapses(G)
 
         S.connect(i=[0, 1, 0, 1], j=[2, 2, 3, 3])
         S.w = 0.05
-        S.cbf = 1.0
+        S.cbft = 1.0
         S.lr = 0.01
 
         # Input to the network
-        P = PoissonGroup(2, [20 * Hz, 40 * Hz])
-        Si = Synapses(P, G, model='w : 1', on_pre='v_post += w')
+        P = PoissonGroup(2, [40 * Hz, 40 * Hz])
+        Si = Synapses(P, G, model='w : 1', on_pre='v_post += w * int(not_refractory_post)')
         Si.connect(i=[0, 1], j=[0, 1])
         Si.w = 0.25
 
@@ -277,14 +293,73 @@ class TestMicrocircuit(unittest.TestCase):
         plt.xlim([0.0, duration / ms])
 
         plt.subplot(224)
-        plt.plot(Ms.t / ms, Mg[0].ulast.T, label='pre1')
-        plt.plot(Ms.t / ms, Mg[1].ulast.T, label='pre2')
+        plt.plot(Ms.t / ms, Mg[0].cbf.T, label='pre1')
+        plt.plot(Ms.t / ms, Mg[1].cbf.T, label='pre2')
         plt.ylabel('cbf')
         plt.xlabel('Time [ms]')
         plt.xlim([0.0, duration / ms])
         plt.legend()
 
         plt.tight_layout()
+
+        plt.ion()
+        plt.show()
+        plt.draw()
+        plt.pause(100.0)
+        plt.close(fig)
+
+    def test_synapse_dynamic_complex(self):
+        N = 64
+        G = createNeuronGroup(N, refractory=15 * ms, tau=50 * ms, vti=0.0)
+        G.v = 0.5 * np.random.uniform(size=N)
+
+        S = createCriticalSynapses(G)
+        S.connect(condition='i != j', p=0.1)
+        S.w = 0.01 + 0.05 * np.random.uniform(size=len(S))
+        S.c = 0.0
+        S.cbft = 1.0
+        S.lr = 0.01
+
+        # Input to the network
+        nbInputs = 8
+        P = PoissonGroup(nbInputs, np.random.uniform(low=20.0, high=50.0, size=(nbInputs,)) * Hz)
+        Si = Synapses(P, G, model='w : 1', on_pre='v_post += w * int(not_refractory_post)')
+        Si.connect(i=np.arange(nbInputs), j=np.random.permutation(np.arange(len(G)))[:nbInputs])
+        Si.w = 0.25
+
+        M = SpikeMonitor(G)
+        Mg = StateMonitor(G, variables=True, record=True)
+        Ms = StateMonitor(S, variables=True, record=True)
+
+        defaultclock.dt = 0.5 * ms
+        net = Network(G, S, P, Si, M, Ms, Mg)
+
+        duration = 10 * second
+        net.run(duration)
+
+        fig = plt.figure()
+        plt.subplot(211)
+        plt.plot(M.t / ms, M.i, '.')
+        plt.ylabel('Neurons')
+        plt.yticks(np.arange(len(G)))
+        plt.xlabel('Time [ms]')
+        plt.xlim([0.0, duration / ms])
+
+        plt.subplot(212)
+        plt.plot(Ms.t / ms, Ms.w.T)
+        plt.ylabel('Weight')
+        plt.xlabel('Time [ms]')
+        plt.xlim([0.0, duration / ms])
+        plt.tight_layout()
+
+        fig = plt.figure()
+        meanCbf = np.mean(Mg.cbf.T, axis=-1)
+        stdCbf = np.std(Mg.cbf.T, axis=-1)
+        plt.plot(Mg.t / ms, meanCbf, color='#1B2ACC')
+        plt.fill_between(Mg.t / ms, meanCbf - stdCbf, meanCbf + stdCbf,
+                         alpha=0.5, edgecolor='#1B2ACC', facecolor='#089FFF', antialiased=True)
+        plt.ylabel('cbf')
+        plt.xlabel('Time [ms]')
 
         plt.ion()
         plt.show()

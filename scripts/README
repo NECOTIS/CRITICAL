@@ -1,0 +1,10 @@
+
+
+# Setup Anaconda environment
+conda create -n critical python=3.6 pip
+source activate critical
+
+conda install matplotlib nose
+conda install -c conda-forge brian2
+
+#conda install gcc_linux-64 gxx_linux-64
