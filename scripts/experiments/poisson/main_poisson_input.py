@@ -67,20 +67,20 @@ def main():
     linewidthList = [1, 1, 1, 2, 1]
     colorList = ['grey', 'black', 'black', 'black', 'black']
     for n in range(len(targetCbfs)):
+        logger.info('Simulating for target branching factor of %f' % (targetCbfs[n]))
 
         # Create the microcircuit
         # NOTE: p_max is chosen so to have an out-degree of N=16
         structure = 'small-world'
-        m = Microcircuit(connectivity=structure, macrocolumnShape=[2, 2, 2], minicolumnShape=[
-                         4, 4, 4], p_max=0.056, srate=0 * Hz, excitatoryProb=1.0)
+        m = Microcircuit(connectivity=structure, macrocolumnShape=[2, 2, 2], minicolumnShape=[4, 4, 4],
+                         p_max=0.056, srate=0 * Hz, excitatoryProb=1.0, delay=0.0 * ms)
 
         # Configure CRITICAL learning rule
         m.S.c_out_ref = targetCbfs[n]      # target critical branching factor
         m.S.alpha = 0.1                    # learning rate
 
         # Define the inputs to the microcircuit
-        # NOTE: Number of average input synaptic connections is fixed to 10% of
-        # reservoir links
+        # NOTE: Number of average input synaptic connections is fixed to 10% of reservoir links
         nbInputs = 64
         P = PoissonGroup(nbInputs, rates=np.linspace(25 * Hz, 50 * Hz, nbInputs))
         Si = Synapses(P, m.G, model='w : 1', on_pre='''v_post += w * int(not_refractory_post)
@@ -88,20 +88,46 @@ def main():
         Si.connect(p=0.1 * len(m.S) / (nbInputs * len(m.G)))
         Si.w = '0.5 + 1.5 * rand()'
 
+        logger.info('Number of neurons in the population: %d' % (len(m.G)))
+        logger.info('Number of synapses in the population: %d' % (len(m.S)))
+
         # Configure the monitors and simulation
+        # NOTE: setting a high time resolution increase the stability of the learning rule
         M = SpikeMonitor(m.G, record=True)
         Mi = SpikeMonitor(P, record=True)
         Mg = StateMonitor(m.G, variables=['cbf'], record=True)
-        Ms = StateMonitor(m.S, variables=['w'], record=True, dt=100 * ms)
-        defaultclock.dt = 1 * ms
-        net = Network(m.G, m.S, P, Si, M, Mi, Mg, Ms)
+        defaultclock.dt = 0.1 * ms
+        net = Network(m.G, m.S, P, Si, M, Mi, Mg)
 
         # Run the simulation with input stimuli enabled
         net.run(duration, report='text')
 
         ax.plot(Mg.t, np.mean(Mg.cbf.T, axis=-1),
                 color=colorList[n], linestyle=linestyleList[n], linewidth=linewidthList[n], label='target = %1.1f' % (targetCbfs[n]))
-        fig.canvas.draw()
+
+        # Compute population average firing rate
+        avgInputFiringRate = len(Mi.i) / (nbInputs * duration)
+        avgOutputFiringRate = len(M.i) / (len(m.G) * duration)
+        logger.info('Average input firing rate: %4.2f Hz' % (avgInputFiringRate))
+        logger.info('Average output firing rate: %4.2f Hz' % (avgOutputFiringRate))
+
+#         # Visualization of the simulation
+#         fig2 = plt.figure(facecolor='white', figsize=(6, 5))
+#         ax2 = fig.add_subplot(1, 1, 1)
+#         plt.subplot(211)
+#         plt.title('Spiking activity (input)')
+#         plt.plot(Mi.t / ms, Mi.i, '.', color='b')
+#         plt.ylabel('Neurons')
+#         plt.xlabel('Time [ms]')
+#         plt.xlim([0.0, duration / ms])
+#
+#         plt.subplot(212)
+#         plt.title('Spiking activity (output)')
+#         plt.plot(M.t / ms, M.i, '.', color='b')
+#         plt.ylabel('Neurons')
+#         plt.xlabel('Time [ms]')
+#         plt.xlim([0.0, duration / ms])
+#         plt.show()
 
     ax.set_ylim([0.0, 2.0])
 

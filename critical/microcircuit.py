@@ -195,7 +195,7 @@ class Microcircuit(object):
 
     def __init__(self, connectivity='small-world',
                  macrocolumnShape=[2, 2, 2], minicolumnShape=[4, 4, 4], minicolumnSpacing=100 * um,
-                 neuronSpacing=10 * um, p_max=0.1, srate=0.0 * Hz, excitatoryProb=0.8):
+                 neuronSpacing=10 * um, p_max=0.1, srate=0.0 * Hz, excitatoryProb=0.8, delay=0.0 * ms):
 
         self.__dict__.update(macrocolumnShape=macrocolumnShape, minicolumnShape=minicolumnShape,
                              minicolumnSpacing=minicolumnSpacing, neuronSpacing=neuronSpacing)
@@ -258,7 +258,7 @@ class Microcircuit(object):
         ntypes[np.where(neuronTypes >= excitatoryProb)] = -1.0
         self.G.ntype = ntypes
 
-        self.S = createCriticalSynapses(self.G)
+        self.S = createCriticalSynapses(self.G, delay)
 
         logger.debug('Creating network topology ''%s'' ...' % (connectivity))
         if connectivity == 'small-world':
