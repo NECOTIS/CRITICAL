@@ -1,4 +1,4 @@
-# Copyright (c) 2018, NECOTIS
+# Copyright (c) 2012-2018, NECOTIS
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without modification,
@@ -130,12 +130,13 @@ def createNeuronGroup(N, refractory=5 * ms, tau_vt=50 * ms, vti=0.1, srate=0.0 *
     return G
 
 
-def createCriticalSynapses(G, delay=0.0 * ms):
+def createCriticalSynapses(G):
 
     # Configure synaptic connections
     eqs = '''
     w : 1                                # synaptic contribution per spike
     alpha : 1                            # learning rate
+    plastic : boolean (shared)           # switch to activate/disable plasticity
     '''
 
     # From: Brodeur, S., & Rouat, J. (2012). Regulation toward Self-organized Criticality in a Recurrent Spiking Neural Reservoir.
@@ -149,9 +150,9 @@ def createCriticalSynapses(G, delay=0.0 * ms):
                 ''',
                 # Step 3 and 4: Calculate the error on the target contribution, and update postsynaptic weights to reduce the error
                 'pre_plasticity': '''
-                cbf_pre = c_out_tot_pre                                                                                        # Store current estimate of the target branching factor
-                e = (c_out_ref_pre - c_out_tot_pre)                                                                            # Calculate the error on the target contribution
-                w = clip(w + alpha * (e / N_outgoing) * exp(-(t - lastspike_post)/tau_pre) * int(ntype_pre > 0), 1e-4, 1.0)    # Update postsynaptic weights to reduce the error, with ponderation scheme to favor recently active postsynaptic neurons
+                cbf_pre = c_out_tot_pre                                                                                                       # Store current estimate of the target branching factor
+                e = (c_out_ref_pre - c_out_tot_pre)                                                                                           # Calculate the error on the target contribution
+                w = clip(w + int(plastic) * alpha * (e / N_outgoing) * exp(-(t - lastspike_post)/tau_pre) * int(ntype_pre > 0), 1e-4, 1.0)    # Update postsynaptic weights to reduce the error, with ponderation scheme to favor recently active postsynaptic neurons
                 ''',
                 # Step 5: Reset state variables to accumulate contributions for another interspike interval
                 'pre_reset': '''
@@ -175,8 +176,7 @@ def createCriticalSynapses(G, delay=0.0 * ms):
                '''
     }
 
-    S = Synapses(G, G, model=eqs, on_pre=on_pre, on_post=on_post,
-                 delay={'pre_transmission': delay})
+    S = Synapses(G, G, model=eqs, on_pre=on_pre, on_post=on_post)
 
     # NOTE: the execution order is important
     S.pre_transmission.order = 1
@@ -258,7 +258,7 @@ class Microcircuit(object):
         ntypes[np.where(neuronTypes >= excitatoryProb)] = -1.0
         self.G.ntype = ntypes
 
-        self.S = createCriticalSynapses(self.G, delay)
+        self.S = createCriticalSynapses(self.G)
 
         logger.debug('Creating network topology ''%s'' ...' % (connectivity))
         if connectivity == 'small-world':
@@ -282,9 +282,11 @@ class Microcircuit(object):
 
         # Configure initial weights [0.25, 0.50]
         self.S.w = '0.25 + 0.25 * rand()'
+        self.S.pre_transmission.delay = delay
 
         # Configure learning rule parameters
         self.S.alpha = 0.1
+        self.S.plastic = True
 
     def printConnectivityStats(self):
 

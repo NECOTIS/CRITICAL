@@ -71,9 +71,9 @@ def main():
 
         # Create the microcircuit
         # NOTE: p_max is chosen so to have an out-degree of N=16
-        structure = 'small-world'
+        structure = 'random'
         m = Microcircuit(connectivity=structure, macrocolumnShape=[2, 2, 2], minicolumnShape=[4, 4, 4],
-                         p_max=0.056, srate=0 * Hz, excitatoryProb=1.0, delay=0.0 * ms)
+                         p_max=0.056, srate=0 * Hz, excitatoryProb=0.8, delay=0.0 * ms)
 
         # Configure CRITICAL learning rule
         m.S.c_out_ref = targetCbfs[n]      # target critical branching factor
@@ -99,10 +99,13 @@ def main():
         defaultclock.dt = 0.1 * ms
         net = Network(m.G, m.S, P, Si, M, Mi, Mg)
 
-        # Run the simulation with input stimuli enabled
+        # Run the simulation with input stimuli and plasticity enabled
+        m.S.plastic = True
         net.run(duration, report='text')
 
-        ax.plot(Mg.t, np.mean(Mg.cbf.T, axis=-1),
+        # NOTE: compute statistics on excitatory neurons only
+        meanCbf = np.mean(Mg.cbf.T[:, m.G.ntype > 0], axis=-1)
+        ax.plot(Mg.t, meanCbf,
                 color=colorList[n], linestyle=linestyleList[n], linewidth=linewidthList[n], label='target = %1.1f' % (targetCbfs[n]))
 
         # Compute population average firing rate
