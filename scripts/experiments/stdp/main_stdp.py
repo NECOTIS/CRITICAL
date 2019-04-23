@@ -36,14 +36,19 @@ import matplotlib.pyplot as plt
 
 from brian2.units import ms, Hz
 from brian2.synapses.synapses import Synapses
-from brian2.input.poissongroup import PoissonGroup
 from brian2.core.clocks import defaultclock
 from brian2.monitors.spikemonitor import SpikeMonitor
 from brian2.core.network import Network
 from brian2.units.allunits import second
 from brian2.monitors.statemonitor import StateMonitor
+from brian2.input.spikegeneratorgroup import SpikeGeneratorGroup
 
 from critical.microcircuit import Microcircuit
+from critical.rankorder import generateRankOrderCodedPatterns, plotPatterns, generateRankOrderCodedData
+
+# NOTE: enable C++ code generation to significantly speed up the simulation
+from brian2.devices.device import set_device
+set_device('cpp_standalone')
 
 logger = logging.getLogger(__name__)
 
@@ -51,59 +56,66 @@ logger = logging.getLogger(__name__)
 def main():
 
     # Choose the duration of the training
-    durationOn = 10 * second
+    duration = 180 * second
     targetCbf = 1.0
 
     logger.info('Simulating for target branching factor of %f' % (targetCbf))
 
     # Create the microcircuit
     # NOTE: p_max is chosen so to have an out-degree of N=16
-    structure = 'random'
-    m = Microcircuit(connectivity=structure, macrocolumnShape=[2, 2, 2], minicolumnShape=[4, 4, 4],
-                     p_max=0.056, srate=1 * Hz, excitatoryProb=1.0, delay=0.0 * ms)
+    m = Microcircuit(connectivity='small-world', macrocolumnShape=[2, 2, 2], minicolumnShape=[4, 4, 4],
+                     p_max=0.056, srate=1 * Hz, excitatoryProb=0.8, delay='1*ms + 2*ms * rand()',
+                     withSTDP=True)
 
     # Configure CRITICAL learning rule
-    m.S.c_out_ref = targetCbf          # target critical branching factor
-    m.S.alpha = 0.1                    # learning rate
+    m.G.c_out_ref = targetCbf          # target critical branching factor
+    m.S.alpha = 0.005                  # learning rate
 
     # Define the inputs to the microcircuit
-    # NOTE: Number of average input synaptic connections is fixed to 10% of reservoir links
-    nbInputs = 64
-    P = PoissonGroup(nbInputs, rates=25 * Hz)
+    # NOTE: Number of average input synaptic connections is fixed to 1% of reservoir links when the mean outdegree is equal to 16
+    nbInputs = 8
+    nbPatterns = 4
+    patterns = generateRankOrderCodedPatterns(nbInputs, nbPatterns, widthEpoch=50 * ms, padding=5 * ms, refractory=5 * ms)
+    indices, times = generateRankOrderCodedData(patterns, duration, delayEpoch=100 * ms)
+    fig = plotPatterns(patterns)
+    fig.savefig('patterns.eps')
+    P = SpikeGeneratorGroup(nbInputs, indices, times)
     Si = Synapses(P, m.G, model='w : 1', on_pre='''v_post += w * int(not_refractory_post)
                                                    c_in_tot_post += w * int(not_refractory_post)''')
-    Si.connect(p=0.1 * len(m.S) / (nbInputs * len(m.G)))
+    meanOutDegree = 16
+    Si.connect(p=0.01 * (len(m.G) * meanOutDegree) / (nbInputs * len(m.G)))
     Si.w = '0.5 + 1.5 * rand()'
 
     logger.info('Number of neurons in the population: %d' % (len(m.G)))
-    logger.info('Number of synapses in the population: %d' % (len(m.S)))
 
     # Configure the monitors and simulation
     # NOTE: setting a high time resolution increase the stability of the learning rule
     M = SpikeMonitor(m.G, record=True)
     Mi = SpikeMonitor(P, record=True)
-    Mg = StateMonitor(m.G, variables=['cbf'], record=True)
+    Mg = StateMonitor(m.G, variables=['cbf'], record=True, dt=10 * ms)
     defaultclock.dt = 0.1 * ms
     net = Network(m.G, m.S, P, Si, M, Mi, Mg)
 
     # Run the simulation with input stimuli and plasticity enabled
     m.S.plastic = True
-    net.run(durationOn, report='text')
+    net.run(duration, report='text')
 
     # Compute population average firing rate
-    avgInputFiringRate = len(Mi.i) / (nbInputs * durationOn)
-    avgOutputFiringRate = len(M.i) / (len(m.G) * durationOn)
+    avgInputFiringRate = len(Mi.i) / (nbInputs * duration)
+    avgOutputFiringRate = len(M.i) / (len(m.G) * duration)
     logger.info('Average input firing rate: %4.2f Hz' % (avgInputFiringRate))
     logger.info('Average output firing rate: %4.2f Hz' % (avgOutputFiringRate))
 
-    # Continue the simulation with input stimuli and plasticity disabled
-    durationOff = 20 * second
-    P.active = False
-    Si.active = False
-    m.S.plastic = False
-    net.run(durationOff, report='text')
-
-    duration = durationOn + durationOff
+    # NOTE: compute statistics on excitatory neurons only
+    meanCbf = np.mean(Mg.cbf.T[:, m.G.ntype > 0], axis=-1)
+    fig = plt.figure(facecolor='white', figsize=(6, 5))
+    ax = fig.add_subplot(1, 1, 1)
+    ax.set_xlabel('Time [sec]')
+    ax.set_ylabel('Average output contributions')
+    ax.plot(Mg.t, meanCbf, color='k')
+    ax.set_ylim((0.0, 2.0))
+    fig.tight_layout()
+    fig.savefig('convergence_pattern.eps')
 
     # Visualization of the simulation
     # NOTE: show only the last 10 sec of the simulation
@@ -113,15 +125,14 @@ def main():
     plt.plot(Mi.t / ms, Mi.i, '.', color='b')
     plt.ylabel('Neurons')
     plt.xlabel('Time [ms]')
-    plt.xlim([(duration - 10 * second) / ms, duration / ms])
+    plt.xlim([0.0, duration / ms])
 
     plt.subplot(212)
     plt.title('Spiking activity (output)')
     plt.plot(M.t / ms, M.i, '.', color='b')
     plt.ylabel('Neurons')
     plt.xlabel('Time [ms]')
-    plt.xlim([(duration - 10 * second) / ms, duration / ms])
-
+    plt.xlim([0.0, duration / ms])
     fig.tight_layout()
 
     plt.show()

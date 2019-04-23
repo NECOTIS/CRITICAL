@@ -37,8 +37,82 @@ from mpl_toolkits.mplot3d import axes3d, art3d
 from brian2.units import ms, um, meter, Hz
 from brian2.groups import NeuronGroup
 from brian2.synapses.synapses import Synapses
+from brian2.input.binomial import BinomialFunction
+from brian2.core.variables import Variables
+from brian2.groups.group import CodeRunner
+from brian2.units.fundamentalunits import check_units
 
 logger = logging.getLogger(__name__)
+
+
+# Adapted from Brian2 class: PoissonInput
+class CriticalSpontaneousActivity(CodeRunner):
+    '''
+    CriticalSpontaneousActivity(target, rate, when='synapses', order=0)
+
+    Adds independent Poisson input to a target variable of a `Group`. For large
+    numbers of inputs, this is much more efficient than creating a
+    `PoissonGroup`. The synaptic events are generated randomly during the
+    simulation and are not preloaded and stored in memory. All the inputs must
+    target the same variable, have the same frequency and same synaptic weight.
+    All neurons in the target `Group` receive independent realizations of
+    Poisson spike trains.
+
+    Parameters
+    ----------
+    target : `Group`
+        The group that is targeted by this input.
+    rate : `Quantity`
+        The rate of each of the inputs
+    when : str, optional
+        When to update the target variable during a time step. Defaults to
+        the `synapses` scheduling slot.
+    order : int, optional
+        The priority of of the update compared to other operations occurring at
+        the same time step and in the same scheduling slot. Defaults to 0.
+
+    '''
+    @check_units(rate=Hz)
+    def __init__(self, target, rate, when='synapses',
+                 order=0):
+        self._rate = rate
+        binomial_sampling = BinomialFunction(1, rate * target.clock.dt,
+                                             name='poissoninput_binomial*')
+
+        # NOTE: elicit a spike, but also increase the total input contribution for
+        #       what was needed to reach the threshold.
+        code = '''
+        eps = 0.01
+        delta_v_to_vt = {binomial}()*(vt - v) * int(not_refractory)
+        c_in_tot += int(delta_v_to_vt > 0) * delta_v_to_vt
+        v += int(delta_v_to_vt > 0) * (delta_v_to_vt + eps)
+        '''.format(binomial=binomial_sampling.name)
+        self._stored_dt = target.dt_[:]  # make a copy
+        # FIXME: we need an explicit reference here for on-the-fly subgroups
+        # For example: PoissonInput(group[:N], ...)
+        self._group = target
+        CodeRunner.__init__(self,
+                            group=target,
+                            template='stateupdate',
+                            code=code,
+                            user_code='',
+                            when=when,
+                            order=order,
+                            name='poissoninput*',
+                            clock=target.clock
+                            )
+        self.variables = Variables(self)
+        self.variables._add_variable(binomial_sampling.name, binomial_sampling)
+
+    rate = property(fget=lambda self: self._rate,
+                    doc='The rate of each input')
+
+    def before_run(self, run_namespace):
+        if self._group.dt_ != self._stored_dt:
+            raise NotImplementedError('The dt used for simulating %s changed '
+                                      'after the PoissonInput source was '
+                                      'created.' % self.group.name)
+        CodeRunner.before_run(self, run_namespace=run_namespace)
 
 
 def quadraticBezierPath(posA, posB, nstep=8, controlDist=0.1, controlDim=[0, 1, 2]):
@@ -101,13 +175,16 @@ def createNeuronGroup(N, refractory=5 * ms, tau_vt=50 * ms, vti=0.1, srate=0.0 *
     '''
 
     # Spike detection
-    if srate > 0.0:
-        threshold = 'v > vt or rand() < srate * dt'
-    else:
-        threshold = 'v > vt'
-
+    threshold = 'v > vt'
     G = NeuronGroup(N, model=eqs, reset=reset, threshold=threshold,
                     refractory=refractory, method='exact')
+
+    if srate > 0.0:
+        # Noise model
+        noise = CriticalSpontaneousActivity(G, srate)
+        G.add_attribute('noise')
+        G.noise = noise
+        G.contained_objects.append(G.noise)
 
     # Configure neuron state variables initial values
     G.v = 0.0
@@ -115,7 +192,7 @@ def createNeuronGroup(N, refractory=5 * ms, tau_vt=50 * ms, vti=0.1, srate=0.0 *
     G.tau_vt = tau_vt
     G.vt0 = '1.0 + 1.0 * rand()'
     G.v0 = '0.5 + 0.5 * rand()'
-    G.vt[:] = G.vt0[:]
+    G.vt = 1.0
     G.vti = vti
     G.srate = srate
 
@@ -128,6 +205,88 @@ def createNeuronGroup(N, refractory=5 * ms, tau_vt=50 * ms, vti=0.1, srate=0.0 *
     G.ntype = 1.0  # Excitatory neuron
 
     return G
+
+
+def createCriticalStdpSynapses(G):
+
+    taupre = 20 * ms   # Time constant for potentiation
+    taupost = taupre   # Time constant for depression
+    wmax = 1.0
+    dApre = 1e-4
+    dApost = -dApre * taupre / taupost * 1.05
+    dApost *= wmax
+    dApre *= wmax
+
+    # Configure synaptic connections
+    eqs = '''
+    dApre/dt = -Apre / taupre : 1 (event-driven)            # STDP presynaptic trace
+    dApost/dt = -Apost / taupost : 1 (event-driven)         # STDP postsynaptic trace
+
+    w : 1                                # synaptic contribution per spike
+    alpha : 1                            # learning rate
+    plastic : boolean (shared)           # switch to activate/disable plasticity
+    '''
+
+    # From: Brodeur, S., & Rouat, J. (2012). Regulation toward Self-organized Criticality in a Recurrent Spiking Neural Reservoir.
+    #       In A. E. Villa, W. Duch, P. Érdi, F. Masulli, & G. Palm (Eds.), Artificial Neural Networks and Machine Learning -- ICANN 2012 (Vol. 7552, pp. 547–554). Springer.
+    # see Algorithm 1: Local unsupervised learning rule for self-organized
+    # criticality
+    on_pre = {  # Step 1: Update estimations of local input contributions
+                'pre_transmission': '''
+                v_post += w  * ntype_pre * int(not_refractory_post)                                                # Add contribution of the presynaptic spike to the dynamic of the post-synaptic neuron
+                c_in_tot_post += w * ntype_pre * int(ntype_pre > 0) * int(not_refractory_post)                     # Update estimations of local input contributions to postsynaptic neurons
+                ''',
+                # Step 3 and 4: Calculate the error on the target contribution, and update postsynaptic weights to reduce the error
+                'pre_plasticity_critical': '''
+                cbf_pre = c_out_tot_pre                                                                                                       # Store current estimate of the target branching factor
+                e = (c_out_ref_pre - c_out_tot_pre)                                                                                           # Calculate the error on the target contribution
+                w = clip(w + int(plastic) * alpha * (e / N_outgoing) * int(ntype_pre > 0), 1e-4, 1.0)                                         # Update postsynaptic weights to reduce the error
+                ''',
+                # STDP potentiation
+                'pre_plasticity_stdp': '''
+                Apre += dApre
+                w = clip(w + Apost, 0, wmax)
+                ''',
+                # Step 5: Reset state variables to accumulate contributions for another interspike interval
+                'pre_reset': '''
+                c_in_tot_pre = 0.0
+                c_out_tot_pre = 0.0
+              '''
+    }
+
+    on_post = {
+        # Step 2: Update estimations of local output contributions
+        # NOTE: The case c_in_tot_post = 0 can happen if spontaneous activity elicited a postsynaptic spike.
+        # In that case, c_out_tot_pre will be zero (no contribution).
+        'post_feedback': '''
+                eps = 1e-10
+                c_out_tot_pre += (w * int(ntype_pre > 0) / (c_in_tot_post)) * int(lastspike_pre > 0.0 * ms) * exp(-(t - lastspike_pre)/ tau_post)               # Update estimations of local output contributions in presynaptic neurons, with ponderation scheme to favor recently active presynaptic neurons.
+                ''',
+        # STDP depression
+        'post_plasticity_stdp': '''
+        Apost += dApost
+        w = clip(w + Apre, 0, wmax)
+                ''',
+        # Step 5: Reset state variables to accumulate contributions for another interspike interval
+        # NOTE: we need this in case the postsynaptic neuron has no outgoing connections
+        'post_reset': '''
+                c_in_tot_post = 0.0
+               '''
+    }
+
+    S = Synapses(G, G, model=eqs, on_pre=on_pre, on_post=on_post, namespace={'taupre': taupre, 'taupost': taupost,
+                                                                             'wmax': wmax, 'dApre': dApre, 'dApost': dApost})
+
+    # NOTE: the execution order is important
+    S.pre_transmission.order = 1
+    S.post_feedback.order = 2
+    S.pre_plasticity_critical.order = 3
+    S.pre_plasticity_stdp.order = 3
+    S.post_plasticity_stdp.order = 4
+    S.pre_reset.order = 4
+    S.post_reset.order = 5
+
+    return S
 
 
 def createCriticalSynapses(G):
@@ -188,6 +347,7 @@ def createCriticalSynapses(G):
     return S
 
 
+# TODO: make a subclass of BrianObject, and store all in _contained_objects member
 class Microcircuit(object):
     '''
     Microcircuit
@@ -195,7 +355,8 @@ class Microcircuit(object):
 
     def __init__(self, connectivity='small-world',
                  macrocolumnShape=[2, 2, 2], minicolumnShape=[4, 4, 4], minicolumnSpacing=100 * um,
-                 neuronSpacing=10 * um, p_max=0.1, srate=0.0 * Hz, excitatoryProb=0.8, delay=0.0 * ms):
+                 neuronSpacing=10 * um, p_max=0.1, srate=0.0 * Hz, excitatoryProb=0.8, delay=0.0 * ms,
+                 withSTDP=False):
 
         self.__dict__.update(macrocolumnShape=macrocolumnShape, minicolumnShape=minicolumnShape,
                              minicolumnSpacing=minicolumnSpacing, neuronSpacing=neuronSpacing)
@@ -258,7 +419,10 @@ class Microcircuit(object):
         ntypes[np.where(neuronTypes >= excitatoryProb)] = -1.0
         self.G.ntype = ntypes
 
-        self.S = createCriticalSynapses(self.G)
+        if withSTDP:
+            self.S = createCriticalStdpSynapses(self.G)
+        else:
+            self.S = createCriticalSynapses(self.G)
 
         logger.debug('Creating network topology ''%s'' ...' % (connectivity))
         if connectivity == 'small-world':
@@ -287,6 +451,9 @@ class Microcircuit(object):
         # Configure learning rule parameters
         self.S.alpha = 0.1
         self.S.plastic = True
+
+    def getBrianObjects(self):
+        return [self.G, self.S]
 
     def printConnectivityStats(self):
 

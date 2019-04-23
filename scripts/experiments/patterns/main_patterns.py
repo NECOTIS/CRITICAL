@@ -46,9 +46,6 @@ from brian2.input.spikegeneratorgroup import SpikeGeneratorGroup
 from critical.microcircuit import Microcircuit
 from critical.rankorder import generateRankOrderCodedPatterns, plotPatterns, generateRankOrderCodedData
 
-from brian2.core.preferences import prefs
-prefs.codegen.target = 'numpy'  # use the Python fallback
-
 logger = logging.getLogger(__name__)
 
 

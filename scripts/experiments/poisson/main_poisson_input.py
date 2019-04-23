@@ -45,9 +45,6 @@ from brian2.monitors.statemonitor import StateMonitor
 
 from critical.microcircuit import Microcircuit
 
-from brian2.core.preferences import prefs
-prefs.codegen.target = 'numpy'  # use the Python fallback
-
 logger = logging.getLogger(__name__)
 
 
