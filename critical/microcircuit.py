@@ -152,7 +152,6 @@ def createNeuronGroup(N, refractory=5 * ms, tau_vt=50 * ms, vti=0.1, srate=0.0 *
         v0 : 1                                # membrane potential reset value
         vt0 : 1                               # adaptive threshold reset value
         vti : 1                               # adaptive threshold increment
-        srate : Hz                            # spontaneous rate
 
         cbf : 1               # last estimation of the target branching factor
         c_in_tot : 1          # estimation of total input contributions
@@ -194,7 +193,6 @@ def createNeuronGroup(N, refractory=5 * ms, tau_vt=50 * ms, vti=0.1, srate=0.0 *
     G.v0 = '0.5 + 0.5 * rand()'
     G.vt = 1.0
     G.vti = vti
-    G.srate = srate
 
     # Configure initial state for learning rule
     G.cbf = 0.0
@@ -245,7 +243,7 @@ def createCriticalStdpSynapses(G):
                 # STDP potentiation
                 'pre_plasticity_stdp': '''
                 Apre += dApre
-                w = clip(w + Apost, 0, wmax)
+                w = clip(w + Apost * int(ntype_pre > 0), 0, wmax)
                 ''',
                 # Step 5: Reset state variables to accumulate contributions for another interspike interval
                 'pre_reset': '''
