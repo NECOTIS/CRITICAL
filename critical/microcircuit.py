@@ -263,7 +263,7 @@ def createCriticalStdpSynapses(G):
         # STDP depression
         'post_plasticity_stdp': '''
         Apost += dApost
-        w = clip(w + Apre, 0, wmax)
+        w = clip(w + Apre * int(ntype_pre > 0), 0, wmax)
                 ''',
         # Step 5: Reset state variables to accumulate contributions for another interspike interval
         # NOTE: we need this in case the postsynaptic neuron has no outgoing connections
