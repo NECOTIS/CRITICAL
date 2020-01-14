@@ -141,7 +141,7 @@ def quadraticBezierPath(posA, posB, nstep=8, controlDist=0.1, controlDim=[0, 1, 
     return segments
 
 
-def createNeuronGroup(N, refractory=5 * ms, tau_vt=50 * ms, vti=0.1, srate=0.0 * Hz):
+def createNeuronGroup(N, refractory=5 * ms, tau_vt=50 * ms, vti=0.1, srate=0.0 * Hz, soft_reset=False):
 
     # Leaky integrate-and-fire neuron with adaptive threshold
     eqs = '''
@@ -168,10 +168,16 @@ def createNeuronGroup(N, refractory=5 * ms, tau_vt=50 * ms, vti=0.1, srate=0.0 *
         ntype : 1       # type of the neuron (excitatory/inhibitory)
     '''
 
-    reset = '''
-    v = v0        # reset membrane potential
-    vt += vti     # increment adaptive threshold
-    '''
+    if soft_reset:
+        reset = '''
+        v -= vt     # soft-reset membrane potential
+        vt += vti   # increment adaptive threshold
+        '''
+    else:
+        reset = '''
+        v = v0      # reset membrane potential
+        vt += vti   # increment adaptive threshold
+        '''
 
     # Spike detection
     threshold = 'v > vt'
@@ -229,27 +235,28 @@ def createCriticalStdpSynapses(G):
     #       In A. E. Villa, W. Duch, P. Érdi, F. Masulli, & G. Palm (Eds.), Artificial Neural Networks and Machine Learning -- ICANN 2012 (Vol. 7552, pp. 547–554). Springer.
     # see Algorithm 1: Local unsupervised learning rule for self-organized
     # criticality
-    on_pre = {  # Step 1: Update estimations of local input contributions
-                'pre_transmission': '''
-                v_post += w  * ntype_pre * int(not_refractory_post)                                                # Add contribution of the presynaptic spike to the dynamic of the post-synaptic neuron
-                c_in_tot_post += w * ntype_pre * int(ntype_pre > 0) * int(not_refractory_post)                     # Update estimations of local input contributions to postsynaptic neurons
-                ''',
-                # Step 3 and 4: Calculate the error on the target contribution, and update postsynaptic weights to reduce the error
-                'pre_plasticity_critical': '''
-                cbf_pre = c_out_tot_pre                                                                                                       # Store current estimate of the target branching factor
-                e = (c_out_ref_pre - c_out_tot_pre)                                                                                           # Calculate the error on the target contribution
-                w = clip(w + int(plastic) * alpha * (e / N_outgoing) * int(ntype_pre > 0), 1e-4, 1.0)                                         # Update postsynaptic weights to reduce the error
-                ''',
-                # STDP potentiation
-                'pre_plasticity_stdp': '''
-                Apre += dApre
-                w = clip(w + Apost * int(ntype_pre > 0), 0, wmax)
-                ''',
-                # Step 5: Reset state variables to accumulate contributions for another interspike interval
-                'pre_reset': '''
-                c_in_tot_pre = 0.0
-                c_out_tot_pre = 0.0
-              '''
+    on_pre = {  
+        # Step 1: Update estimations of local input contributions
+        'pre_transmission': '''
+            v_post += w  * ntype_pre * int(not_refractory_post)                                                # Add contribution of the presynaptic spike to the dynamic of the post-synaptic neuron
+            c_in_tot_post += w * ntype_pre * int(ntype_pre > 0) * int(not_refractory_post)                     # Update estimations of local input contributions to postsynaptic neurons
+        ''',
+        # Step 3 and 4: Calculate the error on the target contribution, and update postsynaptic weights to reduce the error
+        'pre_plasticity_critical': '''
+            cbf_pre = c_out_tot_pre                                                                                                       # Store current estimate of the target branching factor
+            e = (c_out_ref_pre - c_out_tot_pre)                                                                                           # Calculate the error on the target contribution
+            w = clip(w + int(plastic) * alpha * (e / N_outgoing) * int(ntype_pre > 0), 1e-4, 1.0)                                         # Update postsynaptic weights to reduce the error
+        ''',
+        # STDP potentiation
+        'pre_plasticity_stdp': '''
+            Apre += dApre
+            w = clip(w + Apost * int(ntype_pre > 0), 0, wmax)
+        ''',
+        # Step 5: Reset state variables to accumulate contributions for another interspike interval
+        'pre_reset': '''
+            c_in_tot_pre = 0.0
+            c_out_tot_pre = 0.0
+        '''
     }
 
     on_post = {
@@ -257,19 +264,19 @@ def createCriticalStdpSynapses(G):
         # NOTE: The case c_in_tot_post = 0 can happen if spontaneous activity elicited a postsynaptic spike.
         # In that case, c_out_tot_pre will be zero (no contribution).
         'post_feedback': '''
-                eps = 1e-10
-                c_out_tot_pre += (w * int(ntype_pre > 0) / (c_in_tot_post)) * int(lastspike_pre > 0.0 * ms) * exp(-(t - lastspike_pre)/ tau_post)               # Update estimations of local output contributions in presynaptic neurons, with ponderation scheme to favor recently active presynaptic neurons.
-                ''',
+            eps = 1e-10
+            c_out_tot_pre += (w * int(ntype_pre > 0) / (c_in_tot_post)) * int(lastspike_pre > 0.0 * ms) * exp(-(t - lastspike_pre)/ tau_post)               # Update estimations of local output contributions in presynaptic neurons, with ponderation scheme to favor recently active presynaptic neurons.
+        ''',
         # STDP depression
         'post_plasticity_stdp': '''
-        Apost += dApost
-        w = clip(w + Apre * int(ntype_pre > 0), 0, wmax)
-                ''',
+            Apost += dApost
+            w = clip(w + Apre * int(ntype_pre > 0), 0, wmax)
+        ''',
         # Step 5: Reset state variables to accumulate contributions for another interspike interval
         # NOTE: we need this in case the postsynaptic neuron has no outgoing connections
         'post_reset': '''
-                c_in_tot_post = 0.0
-               '''
+            c_in_tot_post = 0.0
+        '''
     }
 
     S = Synapses(G, G, model=eqs, on_pre=on_pre, on_post=on_post, namespace={'taupre': taupre, 'taupost': taupost,
@@ -300,22 +307,23 @@ def createCriticalSynapses(G):
     #       In A. E. Villa, W. Duch, P. Érdi, F. Masulli, & G. Palm (Eds.), Artificial Neural Networks and Machine Learning -- ICANN 2012 (Vol. 7552, pp. 547–554). Springer.
     # see Algorithm 1: Local unsupervised learning rule for self-organized
     # criticality
-    on_pre = {  # Step 1: Update estimations of local input contributions
-                'pre_transmission': '''
-                v_post += w  * ntype_pre * int(not_refractory_post)                                                # Add contribution of the presynaptic spike to the dynamic of the post-synaptic neuron
-                c_in_tot_post += w * ntype_pre * int(ntype_pre > 0) * int(not_refractory_post)                     # Update estimations of local input contributions to postsynaptic neurons
-                ''',
-                # Step 3 and 4: Calculate the error on the target contribution, and update postsynaptic weights to reduce the error
-                'pre_plasticity': '''
-                cbf_pre = c_out_tot_pre                                                                                                       # Store current estimate of the target branching factor
-                e = (c_out_ref_pre - c_out_tot_pre)                                                                                           # Calculate the error on the target contribution
-                w = clip(w + int(plastic) * alpha * (e / N_outgoing) * exp(-(t - lastspike_post)/tau_pre) * int(ntype_pre > 0), 1e-4, 1.0)    # Update postsynaptic weights to reduce the error, with ponderation scheme to favor recently active postsynaptic neurons
-                ''',
-                # Step 5: Reset state variables to accumulate contributions for another interspike interval
-                'pre_reset': '''
-                c_in_tot_pre = 0.0
-                c_out_tot_pre = 0.0
-              '''
+    on_pre = {  
+        # Step 1: Update estimations of local input contributions
+        'pre_transmission': '''
+            v_post += w  * ntype_pre * int(not_refractory_post)                                                # Add contribution of the presynaptic spike to the dynamic of the post-synaptic neuron
+            c_in_tot_post += w * ntype_pre * int(ntype_pre > 0) * int(not_refractory_post)                     # Update estimations of local input contributions to postsynaptic neurons
+        ''',
+        # Step 3 and 4: Calculate the error on the target contribution, and update postsynaptic weights to reduce the error
+        'pre_plasticity': '''
+            cbf_pre = c_out_tot_pre                                                                                                       # Store current estimate of the target branching factor
+            e = (c_out_ref_pre - c_out_tot_pre)                                                                                           # Calculate the error on the target contribution
+            w = clip(w + int(plastic) * alpha * (e / N_outgoing) * exp(-(t - lastspike_post)/tau_pre) * int(ntype_pre > 0), 1e-4, 1.0)    # Update postsynaptic weights to reduce the error, with ponderation scheme to favor recently active postsynaptic neurons
+        ''',
+        # Step 5: Reset state variables to accumulate contributions for another interspike interval
+        'pre_reset': '''
+            c_in_tot_pre = 0.0
+            c_out_tot_pre = 0.0
+        '''
     }
 
     on_post = {
@@ -323,14 +331,14 @@ def createCriticalSynapses(G):
         # NOTE: The case c_in_tot_post = 0 can happen if spontaneous activity elicited a postsynaptic spike.
         # In that case, c_out_tot_pre will be zero (no contribution).
         'post_feedback': '''
-                eps = 1e-10
-                c_out_tot_pre += (w * int(ntype_pre > 0) * int(c_in_tot_post > 0) / (c_in_tot_post + eps)) * int(lastspike_pre > 0.0 * ms) * exp(-(t - lastspike_pre)/ tau_post)               # Update estimations of local output contributions in presynaptic neurons, with ponderation scheme to favor recently active presynaptic neurons.
-                ''',
+            eps = 1e-10
+            c_out_tot_pre += (w * int(ntype_pre > 0) * int(c_in_tot_post > 0) / (c_in_tot_post + eps)) * int(lastspike_pre > 0.0 * ms) * exp(-(t - lastspike_pre)/ tau_post)               # Update estimations of local output contributions in presynaptic neurons, with ponderation scheme to favor recently active presynaptic neurons.
+        ''',
         # Step 5: Reset state variables to accumulate contributions for another interspike interval
         # NOTE: we need this in case the postsynaptic neuron has no outgoing connections
         'post_reset': '''
-                c_in_tot_post = 0.0
-               '''
+            c_in_tot_post = 0.0
+        '''
     }
 
     S = Synapses(G, G, model=eqs, on_pre=on_pre, on_post=on_post)
@@ -354,7 +362,7 @@ class Microcircuit(object):
     def __init__(self, connectivity='small-world',
                  macrocolumnShape=[2, 2, 2], minicolumnShape=[4, 4, 4], minicolumnSpacing=100 * um,
                  neuronSpacing=10 * um, p_max=0.1, srate=0.0 * Hz, excitatoryProb=0.8, delay=0.0 * ms,
-                 withSTDP=False):
+                 withSTDP=False, soft_reset=False):
 
         self.__dict__.update(macrocolumnShape=macrocolumnShape, minicolumnShape=minicolumnShape,
                              minicolumnSpacing=minicolumnSpacing, neuronSpacing=neuronSpacing)
@@ -365,7 +373,7 @@ class Microcircuit(object):
         self.nbNeuronsMinicolumn = np.prod(self.minicolumnShape)
         self.nbNeuronsTotal = self.nbNeuronsMinicolumn * self.nbMinicolumns
 
-        self.G = createNeuronGroup(self.nbNeuronsTotal, vti=0.1, srate=srate)
+        self.G = createNeuronGroup(self.nbNeuronsTotal, vti=0.1, srate=srate, soft_reset=soft_reset)
 
         # Set the 3D coordinates of the neurons
         # Loop over macrocolums
@@ -391,9 +399,9 @@ class Microcircuit(object):
                                     zn += km * minicolumnSpacing
                                 positions.append([xn, yn, zn])
                                 macrocolumIndices.append(
-                                    im * self.macrocolumnShape[0] + jm * self.macrocolumnShape[1] + km)
+                                    im + jm * self.macrocolumnShape[0] + km * self.macrocolumnShape[0] * self.macrocolumnShape[1])
                                 minicolumIndices.append(
-                                    i * self.minicolumnShape[0] + j * self.minicolumnShape[1] + k)
+                                    i + j * self.minicolumnShape[0] + k * self.minicolumnShape[0] * self.minicolumnShape[1])
         positions = np.array(positions, dtype=np.float32)
         macrocolumIndices = np.array(macrocolumIndices, dtype=np.int)
         minicolumIndices = np.array(minicolumIndices, dtype=np.int)
@@ -425,12 +433,12 @@ class Microcircuit(object):
         logger.debug('Creating network topology ''%s'' ...' % (connectivity))
         if connectivity == 'small-world':
             # Connections inside minicolums
-            self.S.connect(condition='i != j and mmidx_pre == mmidx_post',
+            self.S.connect(condition='i != j and midx_pre == midx_post',
                            p='p_max*exp(-((x_pre-x_post)**2+(y_pre-y_post)**2+(z_pre-z_post)**2) / (3*(125*umeter)**2))',
                            namespace={'p_max': p_max})
 
             # Connections across minicolums
-            self.S.connect(condition='i != j and mmidx_pre != mmidx_post',
+            self.S.connect(condition='i != j and midx_pre != midx_post',
                            p='p_max*exp(-((x_pre-x_post)**2+(y_pre-y_post)**2+(z_pre-z_post)**2) / (3*(125*umeter)**2))',
                            namespace={'p_max': p_max})
 
@@ -537,7 +545,7 @@ class Microcircuit(object):
 
             # Use different colors for intracolumnar, intercolumnar and
             # inhibitory connections
-            if np.array_equal(self.G.mmidx[i], self.G.mmidx[j]):
+            if np.array_equal(self.G.midx[i], self.G.midx[j]):
                 # Same minicolumn
                 if self.G.ntype[i] > 0:
                     # Excitatory
