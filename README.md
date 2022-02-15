@@ -1,10 +1,13 @@
 # CRITICAL
-Spiking Reservoir with a critical branching factor
+Plasticity in a spiking Reservoir with a regulation based on critical branching factors. Also inspired from astrocytes, illustration on speech.
 
 ## Paper to cite
 Simon Brodeur and Jean Rouat, Regulation toward Self-Organized Criticality in a Recurrent Spiking Neural Reservoir, int. Conf. on Artificial Neural Networks and Machine Learning, pp. 547-554, 2012
 http://dx.doi.org/10.1007/978-3-642-33269-2_69,
 preprint: https://www.gel.usherbrooke.ca/rouat/publications/paper_ICANN_2012SimonBrodeurJeanRouatSherbrooke.pdf
+
+![Capture d’écran, le 2022-02-15 à 16 44 28](https://user-images.githubusercontent.com/16075468/154154553-7c1daba5-6608-42b8-848e-093e134111b8.png)
+
 
 ## Dependencies
 
