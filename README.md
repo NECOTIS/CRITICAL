@@ -1,6 +1,11 @@
 # CRITICAL
 Spiking Reservoir with a critical branching factor
 
+## Paper to cite
+Simon Brodeur and Jean Rouat, Regulation toward Self-Organized Criticality in a Recurrent Spiking Neural Reservoir, int. Conf. on Artificial Neural Networks and Machine Learning, pp. 547-554, 2012
+http://dx.doi.org/10.1007/978-3-642-33269-2_69,
+preprint: https://www.gel.usherbrooke.ca/rouat/publications/paper_ICANN_2012SimonBrodeurJeanRouatSherbrooke.pdf
+
 ## Dependencies
 
 Main requirements:
